@@ -1,0 +1,48 @@
+------------> log file ==runs/sst2/log_bs1_lr5e-05_20230417_201556_046327.txt
+Namespace(aug_train=False, data_dir='/home/fourteen/workspace/dataset/nlp/glue_data/SST-2', do_eval=False, early_stop=False, early_stop_metric='accuracy', eval_step=200, gradient_accumulation_steps=1, learning_rate=5e-05, local_rank=0, lr_scheduler_type=<SchedulerType.CONSTANT_WITH_WARMUP: 'constant_with_warmup'>, max_length=128, max_train_steps=None, model_name_or_path='textattack/bert-base-uncased-SST-2', num_train_epochs=1, num_warmup_steps=0, output_dir='runs/sst2', pad_to_max_length=False, per_device_eval_batch_size=64, per_device_train_batch_size=1, print_step=1, save_last=False, seed=42, task_name='sst2', train_file=None, use_slow_tokenizer=False, validation_file=None, weight_decay=0.0)
+Distributed environment: NO
+Num processes: 1
+Process index: 0
+Local process index: 0
+Device: cuda
+Mixed precision type: fp16
+
+Sample 14592 of the training set: (tensor([ 101, 1037, 2307, 3185,  102,    0,    0,    0,    0,    0,    0,    0,
+           0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,
+           0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,
+           0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,
+           0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,
+           0,    0,    0,    0]), tensor([1, 1, 1, 1, 1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+        0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+        0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0]), tensor([0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+        0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+        0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0]), tensor(1)).
+Sample 3278 of the training set: (tensor([  101, 14036,  1010,  2065,  5399, 16367,  1010,  2895,   102,     0,
+            0,     0,     0,     0,     0,     0,     0,     0,     0,     0,
+            0,     0,     0,     0,     0,     0,     0,     0,     0,     0,
+            0,     0,     0,     0,     0,     0,     0,     0,     0,     0,
+            0,     0,     0,     0,     0,     0,     0,     0,     0,     0,
+            0,     0,     0,     0,     0,     0,     0,     0,     0,     0,
+            0,     0,     0,     0]), tensor([1, 1, 1, 1, 1, 1, 1, 1, 1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+        0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+        0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0]), tensor([0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+        0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+        0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0]), tensor(1)).
+Sample 36048 of the training set: (tensor([  101,  2130,  2043,  2045,  2024, 11320, 12718,  1010,  1996,  6699,
+         4025, 14469,  1010,   102,     0,     0,     0,     0,     0,     0,
+            0,     0,     0,     0,     0,     0,     0,     0,     0,     0,
+            0,     0,     0,     0,     0,     0,     0,     0,     0,     0,
+            0,     0,     0,     0,     0,     0,     0,     0,     0,     0,
+            0,     0,     0,     0,     0,     0,     0,     0,     0,     0,
+            0,     0,     0,     0]), tensor([1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+        0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+        0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0]), tensor([0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+        0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+        0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0]), tensor(1)).
+***** Running training *****
+  Num examples = 67349
+  Num Epochs = 1
+  Instantaneous batch size per device = 1
+  Total train batch size (w. parallel, distributed & accumulation) = 1
+  Gradient Accumulation steps = 1
+  Total optimization steps = 67349
