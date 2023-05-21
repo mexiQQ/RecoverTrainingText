@@ -126,6 +126,33 @@ def parse_args():
 
     return args
 
+import torch.nn as nn
+class CosineSimilarityLoss(nn.Module):
+    def __init__(self):
+        super(CosineSimilarityLoss, self).__init__()
+        self.cosine_similarity = nn.CosineSimilarity(dim=1, eps=1e-6)
+
+    def forward(self, input, target):
+        cos_sim = self.cosine_similarity(input, target)
+        loss = 1 - cos_sim.mean() ** 2  # You can also use: (1 - cos_sim).mean()
+        return loss
+    
+def decoder(predicted_input, embedding_matrix):
+    predicted_input = predicted_input.view(-1, predicted_input.shape[-1])
+    for i in range(len(predicted_input)):
+        if i > 15:
+            break
+        predict_token = predicted_input[i]
+        best = -1
+        best_dis = float("inf")
+        for j in range(len(embedding_matrix)):
+            candidate_token = embedding_matrix[j]
+            dis = torch.norm(predict_token - candidate_token, p=2).item()
+            if dis < best_dis:
+                best = j
+                best_dis = dis
+        print(best)    
+
 def main():
     args = parse_args()
     start = time.time()
@@ -254,33 +281,95 @@ def main():
         if type(layer) == torch.nn.Linear:
             handlers[name] = layer.register_forward_hook(create_hook(name))
     
-    # m = 30000
-    # d = 50/768
-    # B = 1
-    # Beta = 2
-    # distribution = torch.distributions.MultivariateNormal(loc=torch.zeros(50), covariance_matrix=torch.eye(50))
-    # model.bert.pooler.dense.weight.data[:, :50] = distribution.sample((30000,))
-    # model.bert.pooler.dense.weight.data[:, 50:] = 0
-    # model.classifier.weight.data = torch.full((2, 30000), 1/30000).cuda()
+    distribution = torch.distributions.MultivariateNormal(loc=torch.zeros(50), covariance_matrix=torch.eye(50))
+    model.bert.pooler.dense.weight.data[:, :50] = distribution.sample((30000,))
+    model.bert.pooler.dense.weight.data[:, 50:] = 0
+    model.classifier.weight.data = torch.full((2, 30000), 1/30000).cuda()
     
-    mse_loss = torch.nn.MSELoss(reduction='sum')
+    mse_loss = torch.nn.MSELoss(reduction="sum")
+    cosine_loss = CosineSimilarityLoss()
     for idx, batch in enumerate(train_dataloader):
         model.zero_grad()
         batch = tuple(t.cuda() for t in batch)
         input_ids, input_mask, segment_ids, label_ids = batch
+        print("Model Input", input_ids)
         input_embeddings = model.bert.embeddings.word_embeddings(input_ids)
         
-        outputs1 = model(
+        outputs1, ori_pooler_dense_input = model(
             inputs_embeds=input_embeddings,
             attention_mask=input_mask,
             token_type_ids=segment_ids,
             labels=label_ids,
         )
         
-        loss = outputs1.loss
-        dy_dx = torch.autograd.grad(loss, model.parameters())
-        original_dy_dx = list((_.detach().clone() for _ in dy_dx))
+        loss = outputs1.loss * 1e-5
+        accelerator.backward(loss)
 
+        m = 30000
+        d = 50
+        B = 1
+        Beta = 2
+
+        g = model.classifier.weight.grad.cpu().numpy()[1].reshape(m) #1 x m
+        W = model.bert.pooler.dense.weight.data[:, :50].cpu().numpy() #m, d
+
+        M = np.zeros((d, d))
+        aa = np.sum(g)
+
+        for i in range(d): #768
+            for j in range(d): #768
+                M[i, j] = np.sum(g * W[:, i] * W[:, j])
+                if i == j:
+                    M[i, i] = M[i, i] - aa
+
+        V, D = matlab_eigs(M, Beta)
+        WV = W @ V
+
+        T = np.zeros((Beta, Beta, Beta))
+        for i in range(Beta):
+            for j in range(i, Beta):
+                for k in range(j, Beta):
+                    T[i, j, k] = np.sum(g * WV[:, i] * WV[:, j] * WV[:, k])
+                    T[i, k, j] = T[i, j, k]
+                    T[j, i, k] = T[i, j, k]
+                    T[j, k, i] = T[i, j, k]
+                    T[k, i, j] = T[i, j, k]
+                    T[k, j, i] = T[i, j, k]
+
+        for i in range(Beta):
+            for j in range(Beta):
+                aa = np.sum(g * WV[:, i])
+                T[i, j, j] = T[i, j, j] - aa
+                T[j, i, j] = T[j, i, j] - aa
+                T[j, j, i] = T[j, j, i] - aa
+
+        T = T / m
+        rec_X, _, misc = no_tenfact(T, 100, B)
+        new_recX = V @ rec_X
+        new_recXX = (new_recX / np.linalg.norm(new_recX, ord=2, axis=0)).transpose()        
+        
+        ######################################################################
+        new_recXX = (new_recX / np.linalg.norm(new_recX, ord=2, axis=0)).transpose()        
+        from scipy.spatial import distance
+        input = ori_pooler_dense_input[:, :50].detach().cpu().numpy()
+        # print(input.shape) #1, 50
+        # print(new_recXX.shape) #1, 50
+        print(f"cosin similarity: {1-distance.cosine(new_recXX.reshape(-1), input.reshape(-1))}",
+            f"normalized error: {np.sum((new_recXX.reshape(-1) - input.reshape(-1))**2)}")
+        
+        for i in range(B):
+            new_recX[:, i] = -new_recX[:, i]
+        
+        new_recXX = (new_recX / np.linalg.norm(new_recX, ord=2, axis=0)).transpose()
+        from scipy.spatial import distance
+        input = ori_pooler_dense_input[:, :50].detach().cpu().numpy()
+        # print(input.shape) #1, 50
+        # print(new_recXX.shape) #1, 50
+        print(f"cosin similarity: {1-distance.cosine(new_recXX.reshape(-1), input.reshape(-1))}",
+            f"normalized error: {np.sum((new_recXX.reshape(-1) - input.reshape(-1))**2)}")
+        ######################################################################
+  
+        target = torch.from_numpy(new_recXX).cuda()
         #traverse model parameters and zero gradients
         model.zero_grad()
             
@@ -289,36 +378,31 @@ def main():
         optimizer = torch.optim.LBFGS([dummpy_input], max_iter=10, history_size=10, line_search_fn='strong_wolfe')
 
         print("Original loss: ", mse_loss(input_embeddings, dummpy_input).item())
-        
-        for i in range(300):
+        for i in range(10):
             def closure():
                 optimizer.zero_grad()
-                outputs2 = model(
+                outputs2, pooler_dense_input = model(
                     inputs_embeds=dummpy_input,
                     attention_mask=input_mask,
                     token_type_ids=segment_ids,
                     labels=label_ids,
                 )
-                loss_ce = outputs2.loss
-                dummy_dy_dx = torch.autograd.grad(
-                    loss_ce, 
-                    model.parameters(), 
-                    create_graph=True,
-                    allow_unused=True
-                )
-
-                grad_diff = 0
-                for gx, gy in zip(dummy_dy_dx, original_dy_dx): 
-                    if gx is not None and gy is not None:
-                        grad_diff += ((gx - gy) ** 2).sum()
-                grad_diff.backward()
-                return grad_diff
+                
+                from scipy.spatial import distance
+                input = pooler_dense_input[:, :50].detach().cpu().numpy()
+                print(f"cosin similarity: {abs(1-distance.cosine(new_recXX.reshape(-1), input.reshape(-1)))}",
+                    f"normalized error: {np.sum((new_recXX.reshape(-1) - input.reshape(-1))**2)}")
+                
+                cos_loss = cosine_loss(pooler_dense_input[:, :50], target)
+                cos_loss.backward()
+                return cos_loss
+            
             loss_mse = optimizer.step(closure)
-            if i % 10 == 0:
+            if i % 1 == 0:
                 print(i, loss_mse.item())
 
         print("Reconstruct loss: ", mse_loss(input_embeddings, dummpy_input).item())
-        torch.save(dummpy_input, f"reconstruct_input_embeddings_{idx}.pt")
+        decoder(dummpy_input, model.bert.embeddings.word_embeddings.weight)
         break
     end = time.time()
     print("Time: ", (end - start)/3600, "hours")

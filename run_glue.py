@@ -620,8 +620,6 @@ def main():
     print("#" * 50)
     print("#" * 50)
     for idx in range(len(others)):
-        # import pdb
-        # pdb.set_trace()
         print(f"cosin similarity: {1-distance.cosine(new_recXX.reshape(-1), others[idx][:50].reshape(-1))}", 
               f"normalized error: {np.sum((new_recXX.reshape(-1) - others[idx][:50])**2)}")
         
@@ -638,8 +636,6 @@ def main():
     print("#" * 50)
     print("#" * 50)
     for idx in range(len(others)):
-        # import pdb
-        # pdb.set_trace()
         print(f"cosin similarity: {1-distance.cosine(new_recX.reshape(-1), others[idx][:50].reshape(-1))}", 
               f"normalized error: {np.sum((new_recX.reshape(-1) - others[idx][:50])**2)}")
     

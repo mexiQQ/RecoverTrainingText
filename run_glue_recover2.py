@@ -126,6 +126,22 @@ def parse_args():
 
     return args
 
+def decoder(predicted_input, embedding_matrix):
+    predicted_input = predicted_input.view(-1, predicted_input.shape[-1])
+    for i in range(len(predicted_input)):
+        if i > 15:
+            break
+        predict_token = predicted_input[i]
+        best = -1
+        best_dis = float("inf")
+        for j in range(len(embedding_matrix)):
+            candidate_token = embedding_matrix[j]
+            dis = torch.norm(predict_token - candidate_token, p=2).item()
+            if dis < best_dis:
+                best = j
+                best_dis = dis
+        print(best)  
+        
 def main():
     args = parse_args()
     start = time.time()
@@ -268,7 +284,6 @@ def main():
         model.zero_grad()
         batch = tuple(t.cuda() for t in batch)
         input_ids, input_mask, segment_ids, label_ids = batch
-        
         input_embeddings = model.bert.embeddings.word_embeddings(input_ids)
         
         outputs1 = model(
@@ -279,28 +294,9 @@ def main():
         )
         
         loss = outputs1.loss
-        accelerator.backward(loss)
-        # gradient_pooler = model.bert.pooler.dense.weight.grad.data
-        # gradient_classfier = model.classifier.weight.grad.data
-        first_layer_query_gradient = model.bert.encoder.layer[0].attention.self.query.weight.grad.data.clone().requires_grad_(True)
-        if True:
-            model.zero_grad()
-            input_embeddings = torch.load("/home/fourteen/workspace/recover_text/reconstruct_input_embeddings_0.pt").cuda()
-            new_outputs1 = model(
-                inputs_embeds=input_embeddings,
-                attention_mask=input_mask,
-                token_type_ids=segment_ids,
-                labels=label_ids,
-            )
-            
-            new_loss = new_outputs1.loss
-            accelerator.backward(new_loss)
-            new_first_layer_query_gradient = model.bert.encoder.layer[0].attention.self.query.weight.grad.data.clone().requires_grad_(True)
-        
-            print(mse_loss(first_layer_query_gradient, new_first_layer_query_gradient).item())
-        break
-        # gradient_embeddings = model.bert.embeddings.word_embeddings.grad.data
-        
+        dy_dx = torch.autograd.grad(loss, model.parameters())
+        original_dy_dx = list((_.detach().clone() for _ in dy_dx))
+
         #traverse model parameters and zero gradients
         model.zero_grad()
             
@@ -320,33 +316,28 @@ def main():
                     labels=label_ids,
                 )
                 loss_ce = outputs2.loss
-                # accelerator.backward(loss_ce)
-                
-                dummpy_first_layer_query_gradient = torch.autograd.grad(
+                dummy_dy_dx = torch.autograd.grad(
                     loss_ce, 
-                    model.bert.encoder.layer[0].attention.self.query.weight, 
-                    create_graph=True, 
-                )[0]
-                # calculate the mse loss of gradient_embeddings and dummpy_gradient_embeddings
-                loss = mse_loss(dummpy_first_layer_query_gradient, first_layer_query_gradient)
-                
-                accelerator.backward(loss)
-                return loss
+                    model.parameters(), 
+                    create_graph=True,
+                    allow_unused=True
+                )
+
+                grad_diff = 0
+                for gx, gy in zip(dummy_dy_dx, original_dy_dx): 
+                    if gx is not None and gy is not None:
+                        grad_diff += ((gx - gy) ** 2).sum()
+                grad_diff.backward()
+                return grad_diff
             loss_mse = optimizer.step(closure)
             if i % 10 == 0:
                 print(i, loss_mse.item())
 
         print("Reconstruct loss: ", mse_loss(input_embeddings, dummpy_input).item())
-        
-        torch.save(dummpy_input, f"reconstruct_input_embeddings_{idx}.pt")
+        decoder(dummpy_input, model.bert.embeddings.word_embeddings.weight)
         break
     end = time.time()
     print("Time: ", (end - start)/3600, "hours")
 
 if __name__ == "__main__":
     main()
-
-
-
-
-
