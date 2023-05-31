@@ -29,7 +29,6 @@ import datasets
 from datasets import load_metric
 
 import transformers
-from accelerate import Accelerator
 from transformers import (
     AdamW,
     AutoConfig,
@@ -130,27 +129,15 @@ def main():
     args = parse_args()
     start = time.time()
 
-    accelerator = Accelerator(fp16=False)
-
     logging.basicConfig(
         format="%(asctime)s - %(levelname)s - %(name)s - %(message)s",
         datefmt="%m/%d/%Y %H:%M:%S",
         level=logging.INFO,
     )
-    logger.setLevel(logging.INFO if accelerator.is_local_main_process else logging.ERROR)
-
-    if accelerator.is_local_main_process:
-        datasets.utils.logging.set_verbosity_warning()
-        transformers.utils.logging.set_verbosity_info()
-    else:
-        datasets.utils.logging.set_verbosity_error()
-        transformers.utils.logging.set_verbosity_error()
-
-    if accelerator.is_main_process:
-        logger.info(args)
-        
-    logger.info(accelerator.state)
-    accelerator.wait_for_everyone()
+    logger.setLevel(logging.INFO)
+    datasets.utils.logging.set_verbosity_warning()
+    transformers.utils.logging.set_verbosity_info()
+    logger.info(args)
 
     args.is_regression = args.task_name == "stsb"
     processors = {
@@ -208,12 +195,12 @@ def main():
     train_features = convert_examples_to_features(train_examples, label_list, max_seq_length, tokenizer, output_mode)
     train_dataset, train_labels = get_tensor_data(output_mode, train_features)
 
-    eval_train_features = convert_examples_to_features(eval_train_examples, label_list, max_seq_length, tokenizer, output_mode)
-    eval_train_dataset, eval_train_labels = get_tensor_data(output_mode, eval_train_features)
+    # eval_train_features = convert_examples_to_features(eval_train_examples, label_list, max_seq_length, tokenizer, output_mode)
+    # eval_train_dataset, eval_train_labels = get_tensor_data(output_mode, eval_train_features)
 
-    eval_examples = processor.get_dev_examples(args.data_dir)
-    eval_features = convert_examples_to_features(eval_examples, label_list, max_seq_length, tokenizer, output_mode)
-    eval_dataset, eval_labels = get_tensor_data(output_mode, eval_features)
+    # eval_examples = processor.get_dev_examples(args.data_dir)
+    # eval_features = convert_examples_to_features(eval_examples, label_list, max_seq_length, tokenizer, output_mode)
+    # eval_dataset, eval_labels = get_tensor_data(output_mode, eval_features)
 
     for index in random.sample(range(len(train_dataset)), 3):
         logger.info(f"Sample {index} of the training set: {train_dataset[index]}.")
@@ -230,11 +217,11 @@ def main():
         from_tf=bool(".ckpt" in args.model_name_or_path),
         config=config,
         ignore_mismatched_sizes=True
-    )
-
-    model, train_dataloader = accelerator.prepare(
-        model, train_dataloader
-    )
+    ).cuda()
+    
+    for name, layer in model.named_modules():
+        if isinstance(layer, torch.nn.Dropout):
+            layer.p = 0.0
 
     logger.info("***** Running training *****")
     logger.info(f"  Num examples = {len(train_dataset)}")
@@ -279,11 +266,12 @@ def main():
         )
         
         loss = outputs1.loss
-        accelerator.backward(loss)
+        loss.backward()
         # gradient_pooler = model.bert.pooler.dense.weight.grad.data
         # gradient_classfier = model.classifier.weight.grad.data
+        # gradient_embeddings = model.bert.embeddings.word_embeddings.grad.data
         first_layer_query_gradient = model.bert.encoder.layer[0].attention.self.query.weight.grad.data.clone().requires_grad_(True)
-        if True:
+        if False:
             model.zero_grad()
             input_embeddings = torch.load("/home/fourteen/workspace/recover_text/reconstruct_input_embeddings_0.pt").cuda()
             new_outputs1 = model(
@@ -294,12 +282,11 @@ def main():
             )
             
             new_loss = new_outputs1.loss
-            accelerator.backward(new_loss)
+            loss.backward()
             new_first_layer_query_gradient = model.bert.encoder.layer[0].attention.self.query.weight.grad.data.clone().requires_grad_(True)
         
             print(mse_loss(first_layer_query_gradient, new_first_layer_query_gradient).item())
-        break
-        # gradient_embeddings = model.bert.embeddings.word_embeddings.grad.data
+            break
         
         #traverse model parameters and zero gradients
         model.zero_grad()
@@ -320,8 +307,7 @@ def main():
                     labels=label_ids,
                 )
                 loss_ce = outputs2.loss
-                # accelerator.backward(loss_ce)
-                
+            
                 dummpy_first_layer_query_gradient = torch.autograd.grad(
                     loss_ce, 
                     model.bert.encoder.layer[0].attention.self.query.weight, 
@@ -329,15 +315,14 @@ def main():
                 )[0]
                 # calculate the mse loss of gradient_embeddings and dummpy_gradient_embeddings
                 loss = mse_loss(dummpy_first_layer_query_gradient, first_layer_query_gradient)
-                
-                accelerator.backward(loss)
+                loss.backward()
                 return loss
             loss_mse = optimizer.step(closure)
+            
             if i % 10 == 0:
                 print(i, loss_mse.item())
 
         print("Reconstruct loss: ", mse_loss(input_embeddings, dummpy_input).item())
-        
         torch.save(dummpy_input, f"reconstruct_input_embeddings_{idx}.pt")
         break
     end = time.time()

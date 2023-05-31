@@ -29,7 +29,6 @@ import datasets
 from datasets import load_metric
 
 import transformers
-from accelerate import Accelerator
 from transformers import (
     AdamW,
     AutoConfig,
@@ -142,31 +141,45 @@ def decoder(predicted_input, embedding_matrix):
                 best_dis = dis
         print(best)  
         
+def decoder(predicted_input, embedding_matrix, input_ids):
+    predicted_input = predicted_input.view(-1, predicted_input.shape[-1])
+    ground_truth = input_ids.view(-1)
+    for i in range(len(predicted_input)):
+        if i > 15:
+            break
+        predict_token = predicted_input[i]
+        best_ids = []
+        best_distances = []  # Initialize empty list
+        for j in range(len(embedding_matrix)):
+            candidate_token = embedding_matrix[j]
+            dis = torch.norm(predict_token - candidate_token, p=2).item()
+            # If current distance is less than the maximum of best_distances
+            if len(best_distances) < 2000 or dis < max(best_distances):  
+                # If list is already full, remove index with max distance
+                if len(best_distances) == 2000:  
+                    remove_index = best_distances.index(max(best_distances))
+                    best_distances.pop(remove_index)
+                    best_ids.pop(remove_index)
+                # Append new best distance and its corresponding id
+                best_distances.append(dis)  
+                best_ids.append(j)
+        # Print top 10 best ids and their distances
+        # print(f"Predicted: {i}, Best ids: {best_ids}, Ground Truth: {ground_truth[i].item()}")
+        print(f"Ground Truth: {ground_truth[i].item()}, In predictions: {ground_truth[i].item() in best_ids}")
+        
 def main():
     args = parse_args()
     start = time.time()
-
-    accelerator = Accelerator(fp16=False)
 
     logging.basicConfig(
         format="%(asctime)s - %(levelname)s - %(name)s - %(message)s",
         datefmt="%m/%d/%Y %H:%M:%S",
         level=logging.INFO,
     )
-    logger.setLevel(logging.INFO if accelerator.is_local_main_process else logging.ERROR)
-
-    if accelerator.is_local_main_process:
-        datasets.utils.logging.set_verbosity_warning()
-        transformers.utils.logging.set_verbosity_info()
-    else:
-        datasets.utils.logging.set_verbosity_error()
-        transformers.utils.logging.set_verbosity_error()
-
-    if accelerator.is_main_process:
-        logger.info(args)
-        
-    logger.info(accelerator.state)
-    accelerator.wait_for_everyone()
+    logger.setLevel(logging.INFO)
+    datasets.utils.logging.set_verbosity_warning()
+    transformers.utils.logging.set_verbosity_info()
+    logger.info(args)
 
     args.is_regression = args.task_name == "stsb"
     processors = {
@@ -198,7 +211,7 @@ def main():
         "cola": {"num_train_epochs": 50, "max_seq_length": 64},
         "mnli": {"num_train_epochs": 5, "max_seq_length": 128},
         "mrpc": {"num_train_epochs": 20, "max_seq_length": 128},
-        "sst2": {"num_train_epochs": 10, "max_seq_length": 64},
+        "sst2": {"num_train_epochs": 10, "max_seq_length": 10},
         "stsb": {"num_train_epochs": 20, "max_seq_length": 128},
         "qqp": {"num_train_epochs": 5, "max_seq_length": 128},
         "qnli": {"num_train_epochs": 10, "max_seq_length": 128},
@@ -224,12 +237,12 @@ def main():
     train_features = convert_examples_to_features(train_examples, label_list, max_seq_length, tokenizer, output_mode)
     train_dataset, train_labels = get_tensor_data(output_mode, train_features)
 
-    eval_train_features = convert_examples_to_features(eval_train_examples, label_list, max_seq_length, tokenizer, output_mode)
-    eval_train_dataset, eval_train_labels = get_tensor_data(output_mode, eval_train_features)
+    # eval_train_features = convert_examples_to_features(eval_train_examples, label_list, max_seq_length, tokenizer, output_mode)
+    # eval_train_dataset, eval_train_labels = get_tensor_data(output_mode, eval_train_features)
 
-    eval_examples = processor.get_dev_examples(args.data_dir)
-    eval_features = convert_examples_to_features(eval_examples, label_list, max_seq_length, tokenizer, output_mode)
-    eval_dataset, eval_labels = get_tensor_data(output_mode, eval_features)
+    # eval_examples = processor.get_dev_examples(args.data_dir)
+    # eval_features = convert_examples_to_features(eval_examples, label_list, max_seq_length, tokenizer, output_mode)
+    # eval_dataset, eval_labels = get_tensor_data(output_mode, eval_features)
 
     for index in random.sample(range(len(train_dataset)), 3):
         logger.info(f"Sample {index} of the training set: {train_dataset[index]}.")
@@ -246,11 +259,11 @@ def main():
         from_tf=bool(".ckpt" in args.model_name_or_path),
         config=config,
         ignore_mismatched_sizes=True
-    )
-
-    model, train_dataloader = accelerator.prepare(
-        model, train_dataloader
-    )
+    ).cuda()
+    
+    for name, layer in model.named_modules():
+        if isinstance(layer, torch.nn.Dropout):
+            layer.p = 0.0
 
     logger.info("***** Running training *****")
     logger.info(f"  Num examples = {len(train_dataset)}")
@@ -274,9 +287,9 @@ def main():
     # d = 50/768
     # B = 1
     # Beta = 2
-    # distribution = torch.distributions.MultivariateNormal(loc=torch.zeros(50), covariance_matrix=torch.eye(50))
-    # model.bert.pooler.dense.weight.data[:, :50] = distribution.sample((30000,))
-    # model.bert.pooler.dense.weight.data[:, 50:] = 0
+    # distribution = torch.distributions.MultivariateNormal(loc=torch.zeros(100), covariance_matrix=torch.eye(100))
+    # model.bert.pooler.dense.weight.data[:, :100] = distribution.sample((30000,))
+    # model.bert.pooler.dense.weight.data[:, 100:] = 0
     # model.classifier.weight.data = torch.full((2, 30000), 1/30000).cuda()
     
     mse_loss = torch.nn.MSELoss(reduction='sum')
@@ -286,7 +299,7 @@ def main():
         input_ids, input_mask, segment_ids, label_ids = batch
         input_embeddings = model.bert.embeddings.word_embeddings(input_ids)
         
-        outputs1 = model(
+        outputs1,_ = model(
             inputs_embeds=input_embeddings,
             attention_mask=input_mask,
             token_type_ids=segment_ids,
@@ -302,39 +315,66 @@ def main():
             
         dummpy_input = torch.randn((input_embeddings.shape)).cuda().requires_grad_(True)
         # dummy_label = torch.randn(label_ids.shape).cuda().requires_grad_(True)
-        optimizer = torch.optim.LBFGS([dummpy_input], max_iter=10, history_size=10, line_search_fn='strong_wolfe')
+        #optimizer = torch.optim.LBFGS([dummpy_input], max_iter=10, history_size=10, line_search_fn='strong_wolfe')
+        optimizer = torch.optim.SGD([dummpy_input], lr=1e-2, weight_decay=0.01, momentum=0.9)
+        scheduler = torch.optim.lr_scheduler.StepLR(optimizer, step_size=2000, gamma=0.5)
 
         print("Original loss: ", mse_loss(input_embeddings, dummpy_input).item())
         
-        for i in range(300):
-            def closure():
-                optimizer.zero_grad()
-                outputs2 = model(
-                    inputs_embeds=dummpy_input,
-                    attention_mask=input_mask,
-                    token_type_ids=segment_ids,
-                    labels=label_ids,
-                )
-                loss_ce = outputs2.loss
-                dummy_dy_dx = torch.autograd.grad(
-                    loss_ce, 
-                    model.parameters(), 
-                    create_graph=True,
-                    allow_unused=True
-                )
+        for i in range(8000):
+            # def closure():
+            #     optimizer.zero_grad()
+            #     outputs2,_ = model(
+            #         inputs_embeds=dummpy_input,
+            #         attention_mask=input_mask,
+            #         token_type_ids=segment_ids,
+            #         labels=label_ids,
+            #     )
+            #     loss_ce = outputs2.loss
+            #     dummy_dy_dx = torch.autograd.grad(
+            #         loss_ce, 
+            #         model.parameters(), 
+            #         create_graph=True,
+            #         allow_unused=True
+            #     )
 
-                grad_diff = 0
-                for gx, gy in zip(dummy_dy_dx, original_dy_dx): 
-                    if gx is not None and gy is not None:
-                        grad_diff += ((gx - gy) ** 2).sum()
-                grad_diff.backward()
-                return grad_diff
-            loss_mse = optimizer.step(closure)
+            #     grad_diff = 0
+            #     for gx, gy in zip(dummy_dy_dx, original_dy_dx): 
+            #         if gx is not None and gy is not None:
+            #             grad_diff += ((gx - gy) ** 2).sum()
+            #     grad_diff.backward()
+            #     return grad_diff
+            # loss_mse = optimizer.step(closure)
+            
+            optimizer.zero_grad()
+            outputs2,_ = model(
+                inputs_embeds=dummpy_input,
+                attention_mask=input_mask,
+                token_type_ids=segment_ids,
+                labels=label_ids,
+            )
+            loss_ce = outputs2.loss
+            dummy_dy_dx = torch.autograd.grad(
+                loss_ce, 
+                model.parameters(), 
+                create_graph=True,
+                allow_unused=True
+            )
+
+            grad_diff = 0
+            for gx, gy in zip(dummy_dy_dx, original_dy_dx): 
+                if gx is not None and gy is not None:
+                    grad_diff += ((gx - gy) ** 2).sum()
+            grad_diff.backward()
+            optimizer.step()
+            
             if i % 10 == 0:
-                print(i, loss_mse.item())
-
-        print("Reconstruct loss: ", mse_loss(input_embeddings, dummpy_input).item())
-        decoder(dummpy_input, model.bert.embeddings.word_embeddings.weight)
+                print(i, grad_diff.item())
+                print("Reconstruct loss: ", mse_loss(input_embeddings, dummpy_input).item())
+                
+            scheduler.step()
+            
+        decoder(dummpy_input, model.bert.embeddings.word_embeddings.weight, input_ids)
         break
     end = time.time()
     print("Time: ", (end - start)/3600, "hours")

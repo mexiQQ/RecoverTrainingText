@@ -137,24 +137,23 @@ class CosineSimilarityLoss(nn.Module):
         loss = 1 - cos_sim.mean() ** 2  # You can also use: (1 - cos_sim).mean()
         return loss
     
-# def decoder(predicted_input, embedding_matrix, input_ids):
-#     predicted_input = predicted_input.view(-1, predicted_input.shape[-1])
-#     ground_truth = input_ids.view(-1)
-#     for i in range(len(predicted_input)):
-#         if i > 15:
-#             break
-#         predict_token = predicted_input[i]
-#         best = -1
-#         best_dis = float("inf")
-#         for j in range(len(embedding_matrix)):
-#             candidate_token = embedding_matrix[j]
-#             dis = torch.norm(predict_token - candidate_token, p=2).item()
-#             if dis < best_dis:
-#                 best = j
-#                 best_dis = dis
-#         print(best, ground_truth[i].item())    
-
-
+def decoder(predicted_input, embedding_matrix, input_ids):
+    predicted_input = predicted_input.view(-1, predicted_input.shape[-1])
+    ground_truth = input_ids.view(-1)
+    for i in range(len(predicted_input)):
+        if i > 15:
+            break
+        predict_token = predicted_input[i]
+        best = -1
+        best_dis = float("inf")
+        for j in range(len(embedding_matrix)):
+            candidate_token = embedding_matrix[j]
+            dis = torch.norm(predict_token - candidate_token, p=2).item()
+            if dis < best_dis:
+                best = j
+                best_dis = dis
+        print(best, ground_truth[i].item())    
+        
 def decoder(predicted_input, embedding_matrix, input_ids):
     predicted_input = predicted_input.view(-1, predicted_input.shape[-1])
     ground_truth = input_ids.view(-1)
@@ -168,9 +167,9 @@ def decoder(predicted_input, embedding_matrix, input_ids):
             candidate_token = embedding_matrix[j]
             dis = torch.norm(predict_token - candidate_token, p=2).item()
             # If current distance is less than the maximum of best_distances
-            if len(best_distances) < 5000 or dis < max(best_distances):  
+            if len(best_distances) < 2000 or dis < max(best_distances):  
                 # If list is already full, remove index with max distance
-                if len(best_distances) == 5000:  
+                if len(best_distances) == 2000:  
                     remove_index = best_distances.index(max(best_distances))
                     best_distances.pop(remove_index)
                     best_ids.pop(remove_index)
@@ -179,7 +178,7 @@ def decoder(predicted_input, embedding_matrix, input_ids):
                 best_ids.append(j)
         # Print top 10 best ids and their distances
         # print(f"Predicted: {i}, Best ids: {best_ids}, Ground Truth: {ground_truth[i].item()}")
-        print(f"Ground Truth: {ground_truth[i].item()}, In predictions: {ground_truth[i].item() in best_ids}")
+        print(f"Ground Truth: {ground_truth[i].item()}, In predictions: {ground_truth[i].item() in best_ids}")       
 
 def main():
     args = parse_args()
@@ -319,7 +318,9 @@ def main():
             labels=label_ids,
         )
         
-        loss = outputs1.loss * 1e-5
+        loss = outputs1.loss #* 1e-5
+        dy_dx = torch.autograd.grad(loss, model.parameters(), create_graph=True)
+        original_dy_dx = list((_.detach().clone() for _ in dy_dx))
         loss.backward()
 
         m = 30000
@@ -386,31 +387,70 @@ def main():
             
         dummpy_input = torch.randn((input_embeddings.shape)).cuda().requires_grad_(True)
         # dummy_label = torch.randn(label_ids.shape).cuda().requires_grad_(True)
-        optimizer = torch.optim.LBFGS([dummpy_input], max_iter=10, history_size=10, line_search_fn='strong_wolfe')
+        # optimizer = torch.optim.LBFGS([dummpy_input], max_iter=10, history_size=10, line_search_fn='strong_wolfe')
+        optimizer = torch.optim.SGD([dummpy_input], lr=1e-2, weight_decay=0.01, momentum=0.9)
+        
+        scheduler = torch.optim.lr_scheduler.StepLR(optimizer, step_size=2000, gamma=0.5)
 
         print("Original loss: ", mse_loss(input_embeddings, dummpy_input).item())
-        for i in range(10):
-            def closure():
-                optimizer.zero_grad()
-                outputs2, pooler_dense_input = model(
-                    inputs_embeds=dummpy_input,
-                    attention_mask=input_mask,
-                    token_type_ids=segment_ids,
-                    labels=label_ids,
-                )
+        for i in range(16000):
+            # def closure():
+            #     optimizer.zero_grad()
+            #     outputs2, pooler_dense_input = model(
+            #         inputs_embeds=dummpy_input,
+            #         attention_mask=input_mask,
+            #         token_type_ids=segment_ids,
+            #         labels=label_ids,
+            #     )
                 
+            #     input = pooler_dense_input[:, :sub_dimension].detach().cpu().numpy()
+            #     print(f"cosin similarity: {abs(1-distance.cosine(new_recXX.reshape(-1), input.reshape(-1)))}",
+            #         f"normalized error: {np.sum((new_recXX.reshape(-1) - input.reshape(-1))**2)}")
+                
+            #     cos_loss = cosine_loss(pooler_dense_input[:, :sub_dimension], target)
+            #     cos_loss.backward()
+            #     return cos_loss
+            # loss_mse = optimizer.step(closure)
+            
+            optimizer.zero_grad()
+            outputs2, pooler_dense_input = model(
+                inputs_embeds=dummpy_input,
+                attention_mask=input_mask,
+                token_type_ids=segment_ids,
+                labels=label_ids,
+            )
+            
+            if i % 10 == 0:
                 input = pooler_dense_input[:, :sub_dimension].detach().cpu().numpy()
                 print(f"cosin similarity: {abs(1-distance.cosine(new_recXX.reshape(-1), input.reshape(-1)))}",
                     f"normalized error: {np.sum((new_recXX.reshape(-1) - input.reshape(-1))**2)}")
-                
-                cos_loss = cosine_loss(pooler_dense_input[:, :sub_dimension], target)
-                cos_loss.backward()
-                return cos_loss
+            cos_loss = cosine_loss(pooler_dense_input[:, :sub_dimension], target) * 10 
             
-            loss_mse = optimizer.step(closure)
-            if i % 1 == 0:
-                print(i, loss_mse.item())
-            print("Reconstruct loss: ", mse_loss(input_embeddings, dummpy_input).item())
+            loss_ce = outputs2.loss
+            dummy_dy_dx = torch.autograd.grad(
+                loss_ce, 
+                model.parameters(), 
+                create_graph=True,
+                allow_unused=True
+            )
+
+            grad_diff = 0
+            for gx, gy in zip(dummy_dy_dx, original_dy_dx): 
+                if gx is not None and gy is not None:
+                    grad_diff += ((gx - gy) ** 2).sum()
+            
+            loss_all = cos_loss + grad_diff
+            loss_all.backward()
+            optimizer.step()
+            
+            if i % 10 == 0:
+                print(i, loss_all.item(), cos_loss.item(), grad_diff.item())
+                print("Reconstruct loss: ", mse_loss(input_embeddings, dummpy_input).item())
+                # if mse_loss(input_embeddings, dummpy_input).item() < 300:
+                #     decoder(dummpy_input, model.bert.embeddings.word_embeddings.weight, input_ids)
+                print("")
+                
+            scheduler.step()
             
         decoder(dummpy_input, model.bert.embeddings.word_embeddings.weight, input_ids)
         break

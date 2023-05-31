@@ -310,16 +310,16 @@ def main():
         batch = tuple(t.cuda() for t in batch)
         input_ids, input_mask, segment_ids, label_ids = batch
         print("Model Input", input_ids)
-        input_embeddings = model.bert.embeddings.word_embeddings(input_ids)
+        # input_embeddings = model.bert.embeddings.word_embeddings(input_ids)
         
         outputs1, ori_pooler_dense_input = model(
-            inputs_embeds=input_embeddings,
+            input_ids=input_ids,
             attention_mask=input_mask,
             token_type_ids=segment_ids,
             labels=label_ids,
         )
         
-        loss = outputs1.loss * 1e-5
+        loss = outputs1.loss
         loss.backward()
 
         m = 30000
@@ -327,6 +327,9 @@ def main():
         B = 1
         Beta = 2
 
+        gradient_embedding = model.bert.embeddings.word_embeddings.weight.grad.data
+        top_gradient_input_ids = torch.topk(gradient_embedding.abs().sum(-1), 10)
+                
         g = model.classifier.weight.grad.cpu().numpy()[1].reshape(m) #1 x m
         W = model.bert.pooler.dense.weight.data[:, :sub_dimension].cpu().numpy() #m, d
 
@@ -384,36 +387,35 @@ def main():
         #traverse model parameters and zero gradients
         model.zero_grad()
             
-        dummpy_input = torch.randn((input_embeddings.shape)).cuda().requires_grad_(True)
-        # dummy_label = torch.randn(label_ids.shape).cuda().requires_grad_(True)
-        optimizer = torch.optim.LBFGS([dummpy_input], max_iter=10, history_size=10, line_search_fn='strong_wolfe')
-
-        print("Original loss: ", mse_loss(input_embeddings, dummpy_input).item())
-        for i in range(10):
-            def closure():
-                optimizer.zero_grad()
-                outputs2, pooler_dense_input = model(
-                    inputs_embeds=dummpy_input,
-                    attention_mask=input_mask,
-                    token_type_ids=segment_ids,
-                    labels=label_ids,
-                )
-                
-                input = pooler_dense_input[:, :sub_dimension].detach().cpu().numpy()
-                print(f"cosin similarity: {abs(1-distance.cosine(new_recXX.reshape(-1), input.reshape(-1)))}",
-                    f"normalized error: {np.sum((new_recXX.reshape(-1) - input.reshape(-1))**2)}")
-                
-                cos_loss = cosine_loss(pooler_dense_input[:, :sub_dimension], target)
-                cos_loss.backward()
-                return cos_loss
+        import itertools
+        permutations = list(itertools.permutations(top_gradient_input_ids[1].cpu().numpy().tolist()))
+        
+        best_dis = float("inf")
+        predicted_input = None
+        idx = 0
+        for per in permutations:
+            idx += 1
+            if idx % 10000 == 0:
+                print(f"IDX:{idx}, best dis: {best_dis}, inputs: {predicted_input}")
             
-            loss_mse = optimizer.step(closure)
-            if i % 1 == 0:
-                print(i, loss_mse.item())
-            print("Reconstruct loss: ", mse_loss(input_embeddings, dummpy_input).item())
+            p_input_ids = torch.IntTensor(per).view(input_ids.shape).cuda()
+            _, pooler_dense_input = model(
+                input_ids=p_input_ids,
+                attention_mask=input_mask,
+                token_type_ids=segment_ids,
+                labels=label_ids,
+            )
             
-        decoder(dummpy_input, model.bert.embeddings.word_embeddings.weight, input_ids)
+            input = pooler_dense_input[:, :sub_dimension].detach().cpu().numpy()
+            cos_dis = abs(distance.cosine(new_recXX.reshape(-1), input.reshape(-1)))
+            
+            if cos_dis < best_dis:
+                best_dis = cos_dis
+                predicted_input = p_input_ids
+        
+        print(f"Predicted input ids:", predicted_input)
         break
+    
     end = time.time()
     print("Time: ", (end - start)/3600, "hours")
 
