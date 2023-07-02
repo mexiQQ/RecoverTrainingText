@@ -1,5 +1,5 @@
 export TASK_NAME=sst2
-export DATA_DIR=/home/fourteen/workspace/dataset/nlp/glue_data/SST-2
+export DATA_DIR=/hdd1/jianwei/workspace/datasets/nlp/glue_data/SST-2
 # export TASK_NAME=cola
 # export TASK_NAME=mnli
 # export TASK_NAME=sst2

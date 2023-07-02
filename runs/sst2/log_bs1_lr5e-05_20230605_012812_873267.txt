@@ -1,0 +1,10 @@
+------------> log file ==runs/sst2/log_bs1_lr5e-05_20230605_012812_873267.txt
+Namespace(task_name='sst2', train_file=None, validation_file=None, max_length=128, pad_to_max_length=False, model_name_or_path='textattack/bert-base-uncased-SST-2', use_slow_tokenizer=False, per_device_train_batch_size=1, per_device_eval_batch_size=64, learning_rate=5e-05, weight_decay=0.0, num_train_epochs=1, max_train_steps=None, gradient_accumulation_steps=1, lr_scheduler_type=<SchedulerType.CONSTANT_WITH_WARMUP: 'constant_with_warmup'>, num_warmup_steps=0, output_dir='runs/sst2', seed=42, data_dir='/home/fourteen/workspace/dataset/nlp/glue_data/SST-2', eval_step=200, print_step=1, local_rank=0, aug_train=False, do_eval=False, early_stop=False, early_stop_metric='accuracy', save_last=False)
+Distributed environment: NO
+Num processes: 1
+Process index: 0
+Local process index: 0
+Device: cuda
+
+Mixed precision type: no
+

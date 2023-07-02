@@ -273,7 +273,7 @@ def main():
     if args.early_stop:
         es = EarlyStopping(patience=100, mode='max')
 
-    accelerator = Accelerator(fp16=True)
+    accelerator = Accelerator()
 
     logging.basicConfig(
         format="%(asctime)s - %(levelname)s - %(name)s - %(message)s",
@@ -466,7 +466,7 @@ def main():
             for step, batch in enumerate(train_dataloader):
                 batch = tuple(t.cuda() for t in batch)
                 input_ids, input_mask, segment_ids, label_ids = batch
-                outputs = model(
+                outputs, _ = model(
                     input_ids=input_ids,
                     attention_mask=input_mask,
                     token_type_ids=segment_ids,
